@@ -40,7 +40,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   state.accountType = options.accountType
   state.apiKey =
-    options.apiKey || process.env.API_KEY || process.env.COPILOT_API_KEY || ""
+    options.apiKey ?? process.env.API_KEY ?? process.env.COPILOT_API_KEY ?? ""
   if (options.accountType !== "individual") {
     consola.info(`Using ${options.accountType} plan GitHub account`)
   }

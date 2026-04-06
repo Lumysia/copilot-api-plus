@@ -15,7 +15,7 @@ afterEach(() => {
   state.apiKey = originalApiKey
 })
 
-test("rejects request without configured API key", async () => {
+test("rejects request without presenting an API key", async () => {
   const response = await server.request("http://localhost/v1/models")
 
   expect(response.status).toBe(401)

@@ -13,8 +13,8 @@ function getBearerToken(
 ): string | undefined {
   if (!authorizationHeader) return undefined
 
-  const [scheme, token] = authorizationHeader.split(" ", 2)
-  if (scheme !== "Bearer" || !token) return undefined
+  const [scheme, token] = authorizationHeader.trim().split(/\s+/, 2)
+  if (scheme.toLowerCase() !== "bearer" || !token) return undefined
 
   return token
 }
