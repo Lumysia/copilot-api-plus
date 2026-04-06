@@ -1,5 +1,3 @@
-/// <reference lib="dom" />
-
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
@@ -19,7 +17,7 @@ export const createResponses = async (payload: ResponsesPayload) => {
     body: JSON.stringify(payload),
   })
 
-  if (!response.ok) throw new HTTPError("Failed to create response", response)
+  if (!response.ok) throw new HTTPError("Failed to create responses", response)
 
   return response
 }
