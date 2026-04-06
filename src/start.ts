@@ -18,6 +18,7 @@ interface RunServerOptions {
   port: number
   verbose: boolean
   accountType: string
+  apiKey?: string
   manual: boolean
   rateLimit?: number
   rateLimitWait: boolean
@@ -38,6 +39,8 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   }
 
   state.accountType = options.accountType
+  state.apiKey =
+    options.apiKey || process.env.API_KEY || process.env.COPILOT_API_KEY || ""
   if (options.accountType !== "individual") {
     consola.info(`Using ${options.accountType} plan GitHub account`)
   }
@@ -144,6 +147,12 @@ export const start = defineCommand({
       default: "individual",
       description: "Account type to use (individual, business, enterprise)",
     },
+    "api-key": {
+      alias: "k",
+      type: "string",
+      description:
+        "API key required by downstream clients. Falls back to API_KEY or COPILOT_API_KEY env vars",
+    },
     manual: {
       type: "boolean",
       default: false,
@@ -195,6 +204,7 @@ export const start = defineCommand({
       port: Number.parseInt(args.port, 10),
       verbose: args.verbose,
       accountType: args["account-type"],
+      apiKey: args["api-key"],
       manual: args.manual,
       rateLimit,
       rateLimitWait: args.wait,
