@@ -6,10 +6,12 @@ import { server } from "../src/server"
 const originalApiKey = state.apiKey
 
 beforeEach(() => {
+  state.authFailures.clear()
   state.apiKey = "test-key"
 })
 
 afterEach(() => {
+  state.authFailures.clear()
   state.apiKey = originalApiKey
 })
 
@@ -54,4 +56,44 @@ test("allows requests when API key protection is disabled", async () => {
 
   expect(response.status).toBe(200)
   expect(await response.text()).toBe("Server running")
+})
+
+test("uses proxy headers for auth failure rate limiting", async () => {
+  for (let index = 0; index < 10; index += 1) {
+    const response = await server.request("http://localhost/v1/models", {
+      headers: {
+        "x-forwarded-for": "203.0.113.10, 127.0.0.1",
+      },
+    })
+
+    expect(response.status).toBe(401)
+  }
+
+  const blockedResponse = await server.request("http://localhost/v1/models", {
+    headers: {
+      "x-forwarded-for": "203.0.113.10, 127.0.0.1",
+    },
+  })
+
+  expect(blockedResponse.status).toBe(429)
+})
+
+test("successful authentication clears previous auth failures", async () => {
+  const failedResponse = await server.request("http://localhost/v1/models", {
+    headers: {
+      "x-real-ip": "198.51.100.1",
+    },
+  })
+
+  expect(failedResponse.status).toBe(401)
+
+  const successResponse = await server.request("http://localhost/", {
+    headers: {
+      Authorization: "Bearer test-key",
+      "x-real-ip": "198.51.100.1",
+    },
+  })
+
+  expect(successResponse.status).toBe(200)
+  expect(state.authFailures.has("198.51.100.1")).toBe(false)
 })
