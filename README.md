@@ -13,6 +13,7 @@ Compared with the original upstream project, this fork keeps the README intentio
 
 - OpenAI-compatible endpoints for chat, models, embeddings, and responses
 - Anthropic-compatible messages endpoint
+- Optional downstream API key protection from CLI arg or environment variable
 - Usage and token inspection endpoints
 - Optional rate limit control and manual approval flow
 - Support for individual, business, and enterprise Copilot accounts
@@ -43,6 +44,26 @@ bun run start
 - Lint: `bun run lint`
 - Test: `bun test`
 - Start: `bun run start`
+
+## API Key Protection
+
+You can require clients to send an API key for all incoming requests.
+
+Priority order:
+
+- CLI arg `--api-key`
+- env `API_KEY`
+- env `COPILOT_API_KEY`
+- default empty, meaning disabled
+
+Example:
+
+`bun run start -- --port 3000 --api-key my-secret-key`
+
+Then call the API with either header:
+
+- `Authorization: Bearer my-secret-key`
+- `x-api-key: my-secret-key`
 
 ## API Endpoints
 
