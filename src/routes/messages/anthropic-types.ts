@@ -22,8 +22,33 @@ export interface AnthropicMessagesPayload {
     type: "enabled"
     budget_tokens?: number
   }
+  context_management?: AnthropicContextManagement
   service_tier?: "auto" | "standard_only"
 }
+
+export interface AnthropicContextManagement {
+  edits: Array<AnthropicContextManagementEdit>
+}
+
+export type AnthropicContextManagementEdit =
+  | {
+      type: "clear_thinking_20251015"
+      keep?: {
+        type: "thinking_turns"
+        value: number
+      }
+    }
+  | {
+      type: "clear_tool_uses_20250919"
+      trigger?: {
+        type: "input_tokens"
+        value: number
+      }
+      keep?: {
+        type: "tool_uses"
+        value: number
+      }
+    }
 
 export interface AnthropicTextBlock {
   type: "text"

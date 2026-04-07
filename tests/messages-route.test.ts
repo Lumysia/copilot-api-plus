@@ -481,6 +481,76 @@ test("normalizes claude thinking budget to upstream minimum for messages api", a
   })
 })
 
+test("adds context-management beta when forwarding anthropic context_management", async () => {
+  let forwardedBody: Record<string, unknown> | undefined
+  let forwardedHeaders: Headers | undefined
+
+  globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+    forwardedHeaders = new Headers(init?.headers)
+    const requestBody = typeof init?.body === "string" ? init.body : "{}"
+    forwardedBody = JSON.parse(requestBody) as Record<string, unknown>
+
+    return new Response(
+      JSON.stringify({
+        id: "msg_claude_context_management",
+        type: "message",
+        role: "assistant",
+        model: "Claude Sonnet 4.6",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4.6",
+      max_tokens: 256,
+      context_management: {
+        edits: [
+          {
+            type: "clear_tool_uses_20250919",
+            trigger: { type: "input_tokens", value: 100000 },
+            keep: { type: "tool_uses", value: 3 },
+          },
+        ],
+      },
+      messages: [{ role: "user", content: "hello" }],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(forwardedHeaders?.get("anthropic-beta")).toContain(
+    "context-management-2025-06-27",
+  )
+  expect(forwardedBody?.context_management).toEqual({
+    edits: [
+      {
+        type: "clear_tool_uses_20250919",
+        trigger: { type: "input_tokens", value: 100000 },
+        keep: { type: "tool_uses", value: 3 },
+      },
+    ],
+  })
+})
+
 test("streams claude messages api events without chat-completions translation", async () => {
   globalThis.fetch = ((_url: string | URL | Request, _init?: RequestInit) => {
     return new Response(

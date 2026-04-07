@@ -117,6 +117,10 @@ function buildMessagesHeaders(
     betaHeaders.add("interleaved-thinking-2025-05-14")
   }
 
+  if (payload.context_management) {
+    betaHeaders.add("context-management-2025-06-27")
+  }
+
   if (betaHeaders.size > 0) {
     headers["anthropic-beta"] = [...betaHeaders].join(",")
   }
