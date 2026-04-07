@@ -2,7 +2,10 @@ import type { SSEMessage } from "hono/streaming"
 
 import { events } from "fetch-event-stream"
 
-import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
+import type {
+  AnthropicMessagesPayload,
+  AnthropicTool,
+} from "~/routes/messages/anthropic-types"
 
 import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
@@ -43,6 +46,9 @@ export const createMessages = async (
           if (typeof event.data !== "string") {
             continue
           }
+          if (event.data === "[DONE]") {
+            continue
+          }
 
           yield {
             data: event.data,
@@ -65,8 +71,8 @@ function normalizeMessagesPayload(
 ): AnthropicMessagesPayload {
   const thinking = normalizeThinkingConfig(payload)
   const system = normalizeSystemBlocks(payload.system)
-  const messages = payload.messages.map(normalizeMessageCacheControl)
-  const tools = payload.tools?.map(normalizeToolCacheControl)
+  const messages = payload.messages.map((m) => normalizeMessageCacheControl(m))
+  const tools = payload.tools?.map((t) => normalizeToolCacheControl(t))
 
   return {
     ...payload,
@@ -94,34 +100,36 @@ function normalizeMessageCacheControl(
   message: AnthropicMessagesPayload["messages"][number],
 ): AnthropicMessagesPayload["messages"][number] {
   if (typeof message.content === "string") {
-    return message
+    return { role: message.role, content: message.content } as typeof message
   }
 
   return {
-    ...message,
+    role: message.role,
     content: message.content.map((block) => {
       if (block.type === "tool_result") {
         return {
           ...block,
-          ...(block.cache_control ? { cache_control: { type: "ephemeral" } } : {}),
+          ...(block.cache_control ?
+            { cache_control: { type: "ephemeral" } }
+          : {}),
         }
       }
 
       if (block.type === "text" || block.type === "image") {
         return {
           ...block,
-          ...(block.cache_control ? { cache_control: { type: "ephemeral" } } : {}),
+          ...(block.cache_control ?
+            { cache_control: { type: "ephemeral" } }
+          : {}),
         }
       }
 
       return block
     }),
-  }
+  } as typeof message
 }
 
-function normalizeToolCacheControl(
-  tool: AnthropicMessagesPayload["tools"][number],
-): AnthropicMessagesPayload["tools"][number] {
+function normalizeToolCacheControl(tool: AnthropicTool): AnthropicTool {
   return {
     ...tool,
     ...(tool.cache_control ? { cache_control: { type: "ephemeral" } } : {}),
