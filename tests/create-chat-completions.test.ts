@@ -12,7 +12,14 @@ state.accountType = "individual"
 
 // Helper to mock fetch
 const fetchMock = mock(
-  (_url: string, opts: { headers: Record<string, string> }) => {
+  (
+    _url: string,
+    opts: { headers: Record<string, string> },
+  ): {
+    ok: boolean
+    json: () => { id: string; object: string; choices: Array<never> }
+    headers: Headers | Record<string, string>
+  } => {
     return {
       ok: true,
       json: () => ({ id: "123", object: "chat.completion", choices: [] }),
@@ -78,6 +85,53 @@ test("maps max_completion_tokens to max_tokens before forwarding", async () => {
 
   expect(forwardedBody.max_tokens).toBe(321)
   expect("max_completion_tokens" in forwardedBody).toBe(false)
+})
+
+test("uses max_completion_tokens for gpt-5 family models", async () => {
+  fetchMock.mockClear()
+  state.models = {
+    object: "list",
+    data: [
+      {
+        id: "gpt-5.4",
+        object: "model",
+        name: "GPT-5.4",
+        version: "2026-01-01",
+        vendor: "openai",
+        preview: false,
+        model_picker_enabled: true,
+        capabilities: {
+          object: "capabilities",
+          type: "chat",
+          family: "gpt-5",
+          tokenizer: "o200k_base",
+          limits: {
+            max_context_window_tokens: 400000,
+            max_output_tokens: 8192,
+          },
+          supports: {
+            tool_calls: true,
+            parallel_tool_calls: true,
+            vision: true,
+            thinking: true,
+          },
+        },
+      },
+    ],
+  }
+
+  await createChatCompletions({
+    messages: [{ role: "user", content: "hi" }],
+    model: "gpt-5.4",
+    max_tokens: 321,
+  })
+
+  const forwardedBody = JSON.parse(
+    getLastForwardedRequest().body,
+  ) as ChatCompletionsPayload
+
+  expect(forwardedBody.max_completion_tokens).toBe(321)
+  expect("max_tokens" in forwardedBody).toBe(false)
 })
 
 test("normalizes developer role to system before forwarding", async () => {

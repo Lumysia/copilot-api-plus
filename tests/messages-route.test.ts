@@ -27,11 +27,37 @@ const testModels = {
           tool_calls: true,
           parallel_tool_calls: true,
           vision: true,
+          thinking: true,
+        },
+      },
+    },
+    {
+      id: "gpt-5.4",
+      object: "model",
+      name: "GPT-5.4",
+      version: "2026-01-01",
+      vendor: "openai",
+      preview: false,
+      model_picker_enabled: true,
+      capabilities: {
+        object: "capabilities",
+        type: "chat",
+        family: "gpt-5",
+        tokenizer: "o200k_base",
+        limits: {
+          max_context_window_tokens: 400000,
+          max_output_tokens: 8192,
+        },
+        supports: {
+          tool_calls: true,
+          parallel_tool_calls: true,
+          vision: true,
+          thinking: true,
         },
       },
     },
   ],
-} as const
+}
 
 const originalApiKey = state.apiKey
 const originalModels = state.models
@@ -85,7 +111,7 @@ test("propagates anthropic request-id headers from upstream success responses", 
         },
       },
     )
-  }) as typeof fetch
+  }) as unknown as typeof fetch
 
   const response = await server.request("http://localhost/v1/messages", {
     method: "POST",
@@ -128,7 +154,7 @@ test("converts upstream OpenAI error envelopes into Anthropic error envelopes", 
         },
       },
     )
-  }) as typeof fetch
+  }) as unknown as typeof fetch
 
   const response = await server.request("http://localhost/v1/messages", {
     method: "POST",
@@ -156,4 +182,62 @@ test("converts upstream OpenAI error envelopes into Anthropic error envelopes", 
       message: "The model `gpt-missing` does not exist",
     },
   })
+})
+
+test("forwards anthropic max_tokens as max_completion_tokens for gpt-5 models", async () => {
+  let forwardedBody: Record<string, unknown> | undefined
+
+  globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+    const requestBody = typeof init?.body === "string" ? init.body : "{}"
+    forwardedBody = JSON.parse(requestBody) as Record<string, unknown>
+
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-anthropic-gpt5",
+        object: "chat.completion",
+        created: 0,
+        model: "gpt-5.4",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Hello from GPT-5",
+            },
+            finish_reason: "stop",
+            logprobs: null,
+          },
+        ],
+        usage: {
+          prompt_tokens: 3,
+          completion_tokens: 4,
+          total_tokens: 7,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "gpt-5.4",
+      max_tokens: 32,
+      messages: [{ role: "user", content: "hello" }],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(forwardedBody?.max_completion_tokens).toBe(32)
+  expect(forwardedBody?.max_tokens).toBeUndefined()
 })

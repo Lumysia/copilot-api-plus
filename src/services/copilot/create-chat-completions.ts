@@ -12,9 +12,9 @@ export const createChatCompletions = async (
 ): Promise<ChatCompletionResult> => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const { max_completion_tokens, stream_options, ...restPayload } = payload
-  const hasMaxTokens =
-    payload.max_tokens !== null && payload.max_tokens !== undefined
+  const { max_completion_tokens, max_tokens, stream_options, ...restPayload } =
+    payload
+  const hasMaxTokens = max_tokens !== null && max_tokens !== undefined
   const hasMaxCompletionTokens =
     max_completion_tokens !== null && max_completion_tokens !== undefined
   const normalizedStreamOptions =
@@ -24,13 +24,21 @@ export const createChatCompletions = async (
         include_usage: true,
       }
     : stream_options
+  const usesMaxCompletionTokens = modelUsesMaxCompletionTokens(payload.model)
+  const normalizedTokenPayload: Partial<ChatCompletionsPayload> = {}
+
+  if (hasMaxTokens || hasMaxCompletionTokens) {
+    if (usesMaxCompletionTokens) {
+      normalizedTokenPayload.max_completion_tokens =
+        max_completion_tokens ?? max_tokens
+    } else {
+      normalizedTokenPayload.max_tokens = max_tokens ?? max_completion_tokens
+    }
+  }
+
   const normalizedPayload: ChatCompletionsPayload = {
     ...restPayload,
-    ...(hasMaxTokens || hasMaxCompletionTokens ?
-      {
-        max_tokens: payload.max_tokens ?? max_completion_tokens,
-      }
-    : {}),
+    ...normalizedTokenPayload,
     ...(normalizedStreamOptions ?
       { stream_options: normalizedStreamOptions }
     : {}),
@@ -116,6 +124,19 @@ function normalizeMessageContent(
       text: part.text.trimEnd(),
     }
   })
+}
+
+function modelUsesMaxCompletionTokens(modelId: string): boolean {
+  const model = state.models?.data.find((candidate) => candidate.id === modelId)
+  const supports = model?.capabilities.supports
+
+  return Boolean(
+    supports?.thinking
+      || supports?.reasoning_effort
+      || supports?.adaptive_thinking
+      || supports?.min_thinking_budget
+      || supports?.max_thinking_budget,
+  )
 }
 
 // Streaming types
