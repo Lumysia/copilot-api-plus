@@ -322,6 +322,28 @@ describe("Anthropic thinking and tool translation", () => {
       },
     ])
   })
+
+  test("should append a synthetic user continuation when translation ends on assistant", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "Start" },
+        { role: "assistant", content: "Continuing draft" },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+
+    expect(openAIPayload.messages.at(-2)).toEqual({
+      role: "assistant",
+      content: "Continuing draft",
+    })
+    expect(openAIPayload.messages.at(-1)).toEqual({
+      role: "user",
+      content: "Please continue.",
+    })
+  })
 })
 
 describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => {

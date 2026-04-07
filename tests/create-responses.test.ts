@@ -211,6 +211,34 @@ test("preserves caller supplied responses-specific fields", async () => {
   ])
 })
 
+test("maps chat-completions logprobs requests to responses top_logprobs", async () => {
+  fetchMock = mock((_url: string, _opts?: RequestInit) =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({ id: "resp_logprobs", object: "response" }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    ),
+  )
+  globalThis.fetch = fetchMock as unknown as typeof fetch
+
+  await createResponses({
+    model: "gpt-4.1",
+    input: "hello",
+    logprobs: true,
+  })
+
+  const requestBody = parseRequestBody() as ResponsesPayload & {
+    top_logprobs?: number
+  }
+
+  expect(requestBody.top_logprobs).toBe(3)
+  expect(requestBody.logprobs).toBeUndefined()
+})
+
 test("preserves streaming response metadata", async () => {
   fetchMock = mock((_url: string, _opts?: RequestInit) =>
     Promise.resolve(

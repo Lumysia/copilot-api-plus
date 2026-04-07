@@ -33,9 +33,8 @@ export function translateToOpenAI(
 ): ChatCompletionsPayload {
   return {
     model: translateModelName(payload.model),
-    messages: translateAnthropicMessagesToOpenAI(
-      payload.messages,
-      payload.system,
+    messages: ensureTrailingUserMessage(
+      translateAnthropicMessagesToOpenAI(payload.messages, payload.system),
     ),
     max_tokens: payload.max_tokens,
     stop: payload.stop_sequences,
@@ -71,6 +70,16 @@ function translateAnthropicMessagesToOpenAI(
   )
 
   return [...systemMessages, ...otherMessages]
+}
+
+function ensureTrailingUserMessage(messages: Array<Message>): Array<Message> {
+  const lastMessage = messages.at(-1)
+
+  if (lastMessage?.role !== "assistant") {
+    return messages
+  }
+
+  return [...messages, { role: "user", content: "Please continue." }]
 }
 
 function handleSystemPrompt(

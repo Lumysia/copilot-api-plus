@@ -149,7 +149,7 @@ function getInitiator(input: unknown): "agent" | "user" {
 function normalizeResponsesPayload(
   payload: ResponsesPayload,
 ): ResponsesPayload {
-  const { max_tokens, tool_choice, tools, ...restPayload } = payload
+  const { logprobs, max_tokens, tool_choice, tools, ...restPayload } = payload
   const include = new Set(payload.include ?? [])
   include.add(DEFAULT_RESPONSES_INCLUDE)
   const normalizedTools =
@@ -159,6 +159,7 @@ function normalizeResponsesPayload(
     ...restPayload,
     input: normalizeInput(payload.input),
     max_output_tokens: payload.max_output_tokens ?? max_tokens ?? undefined,
+    top_logprobs: payload.top_logprobs ?? (logprobs === true ? 3 : undefined),
     store: payload.store ?? false,
     truncation: payload.truncation ?? "disabled",
     include: [...include],
