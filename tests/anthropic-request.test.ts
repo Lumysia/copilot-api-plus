@@ -192,7 +192,43 @@ describe("Anthropic thinking and tool translation", () => {
     expect(assistantMessage?.reasoning_opaque).toBe("sig_123")
     expect(assistantMessage?.signature).toBeUndefined()
   })
+})
 
+describe("Anthropic thinking request metadata translation", () => {
+  test("should request upstream reasoning summary and encrypted content when anthropic thinking is enabled", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-5.4",
+      messages: [{ role: "user", content: "Think carefully" }],
+      max_tokens: 100,
+      thinking: {
+        type: "enabled",
+        budget_tokens: 32,
+      },
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+
+    expect(openAIPayload.reasoning).toEqual({
+      summary: "detailed",
+    })
+    expect(openAIPayload.include).toEqual(["reasoning.encrypted_content"])
+  })
+
+  test("should not request upstream reasoning metadata when anthropic thinking is disabled", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-5.4",
+      messages: [{ role: "user", content: "Answer directly" }],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+
+    expect(openAIPayload.reasoning).toBeUndefined()
+    expect(openAIPayload.include).toBeUndefined()
+  })
+})
+
+describe("Anthropic tool translation", () => {
   test("should handle thinking blocks with tool calls", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "claude-3-5-sonnet-20241022",

@@ -256,6 +256,11 @@ export interface ChatCompletionsPayload {
     | "required"
     | { type: "function"; function: { name: string } }
     | null
+  include?: Array<string> | null
+  reasoning?: {
+    effort?: "low" | "medium" | "high" | "minimal" | null
+    summary?: "auto" | "concise" | "detailed" | null
+  } | null
   user?: string | null
 }
 

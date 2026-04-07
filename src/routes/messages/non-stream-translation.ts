@@ -31,6 +31,8 @@ import { mapOpenAIStopReasonToAnthropic } from "./utils"
 export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
 ): ChatCompletionsPayload {
+  const thinkingEnabled = payload.thinking?.type === "enabled"
+
   return {
     model: translateModelName(payload.model),
     messages: ensureTrailingUserMessage(
@@ -44,6 +46,14 @@ export function translateToOpenAI(
     user: payload.metadata?.user_id,
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
+    ...(thinkingEnabled ?
+      {
+        reasoning: {
+          summary: "detailed",
+        },
+        include: ["reasoning.encrypted_content"],
+      }
+    : {}),
   }
 }
 

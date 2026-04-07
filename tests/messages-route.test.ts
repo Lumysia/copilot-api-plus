@@ -241,3 +241,62 @@ test("forwards anthropic max_tokens as max_completion_tokens for gpt-5 models", 
   expect(forwardedBody?.max_completion_tokens).toBe(32)
   expect(forwardedBody?.max_tokens).toBeUndefined()
 })
+
+test("requests upstream reasoning fields for `/v1/messages` when anthropic thinking is enabled", async () => {
+  let forwardedBody: Record<string, unknown> | undefined
+
+  globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+    const requestBody = typeof init?.body === "string" ? init.body : "{}"
+    forwardedBody = JSON.parse(requestBody) as Record<string, unknown>
+
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-anthropic-thinking",
+        object: "chat.completion",
+        created: 0,
+        model: "gpt-5.4",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Hello from GPT-5",
+            },
+            finish_reason: "stop",
+            logprobs: null,
+          },
+        ],
+        usage: {
+          prompt_tokens: 3,
+          completion_tokens: 4,
+          total_tokens: 7,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "gpt-5.4",
+      max_tokens: 32,
+      thinking: { type: "enabled", budget_tokens: 16 },
+      messages: [{ role: "user", content: "hello" }],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(forwardedBody?.reasoning).toEqual({ summary: "detailed" })
+  expect(forwardedBody?.include).toEqual(["reasoning.encrypted_content"])
+})
