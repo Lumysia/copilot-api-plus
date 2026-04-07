@@ -56,6 +56,33 @@ const testModels = {
         },
       },
     },
+    {
+      id: "claude-sonnet-4.6",
+      object: "model",
+      name: "Claude Sonnet 4.6",
+      version: "2026-01-01",
+      vendor: "anthropic",
+      preview: false,
+      model_picker_enabled: true,
+      capabilities: {
+        object: "capabilities",
+        type: "chat",
+        family: "claude-sonnet-4",
+        tokenizer: "claude",
+        limits: {
+          max_context_window_tokens: 200000,
+          max_output_tokens: 8192,
+        },
+        supports: {
+          tool_calls: true,
+          parallel_tool_calls: true,
+          vision: true,
+          thinking: true,
+          min_thinking_budget: 1024,
+          max_thinking_budget: 32000,
+        },
+      },
+    },
   ],
 }
 
@@ -299,4 +326,147 @@ test("requests upstream reasoning fields for `/v1/messages` when anthropic think
   expect(response.status).toBe(200)
   expect(forwardedBody?.reasoning).toEqual({ summary: "detailed" })
   expect(forwardedBody?.include).toEqual(["reasoning.encrypted_content"])
+})
+
+test("routes claude `/v1/messages` requests to upstream messages api", async () => {
+  let forwardedUrl: string | undefined
+  let forwardedBody: Record<string, unknown> | undefined
+  let forwardedHeaders: Headers | undefined
+
+  globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) => {
+    if (typeof url === "string") {
+      forwardedUrl = url
+    } else if (url instanceof URL) {
+      forwardedUrl = url.toString()
+    } else {
+      forwardedUrl = url.url
+    }
+    forwardedHeaders = new Headers(init?.headers)
+    const requestBody = typeof init?.body === "string" ? init.body : "{}"
+    forwardedBody = JSON.parse(requestBody) as Record<string, unknown>
+
+    return new Response(
+      JSON.stringify({
+        id: "msg_claude_thinking",
+        type: "message",
+        role: "assistant",
+        model: "Claude Sonnet 4.6",
+        content: [
+          {
+            type: "thinking",
+            thinking: "Need arithmetic reasoning.",
+            signature: "sig_123",
+          },
+          {
+            type: "text",
+            text: "323",
+          },
+        ],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: {
+          input_tokens: 10,
+          output_tokens: 12,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "req_claude_123",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4.6",
+      max_tokens: 256,
+      thinking: { type: "enabled", budget_tokens: 128 },
+      messages: [{ role: "user", content: "what is 17*19?" }],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(forwardedUrl).toBe("https://api.githubcopilot.com/v1/messages")
+  expect(forwardedHeaders?.get("anthropic-beta")).toContain(
+    "interleaved-thinking-2025-05-14",
+  )
+  expect(forwardedBody).toMatchObject({
+    model: "claude-sonnet-4.6",
+    thinking: { type: "enabled", budget_tokens: 128 },
+  })
+
+  expect(await response.json()).toEqual({
+    id: "msg_claude_thinking",
+    type: "message",
+    role: "assistant",
+    model: "Claude Sonnet 4.6",
+    content: [
+      {
+        type: "thinking",
+        thinking: "Need arithmetic reasoning.",
+        signature: "sig_123",
+      },
+      {
+        type: "text",
+        text: "323",
+      },
+    ],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: {
+      input_tokens: 10,
+      output_tokens: 12,
+    },
+  })
+})
+
+test("streams claude messages api events without chat-completions translation", async () => {
+  globalThis.fetch = ((_url: string | URL | Request, _init?: RequestInit) => {
+    return new Response(
+      [
+        "event: message_start\n",
+        'data: {"type":"message_start","message":{"id":"msg_stream","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4.6","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
+        "event: content_block_start\n",
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"Plan"}}\n\n',
+      ].join(""),
+      {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream",
+          "x-request-id": "req_claude_stream_123",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4.6",
+      stream: true,
+      max_tokens: 256,
+      thinking: { type: "enabled", budget_tokens: 128 },
+      messages: [{ role: "user", content: "why sky blue" }],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(response.headers.get("content-type")).toBe("text/event-stream")
+  const body = await response.text()
+  expect(body).toContain("event: content_block_start")
+  expect(body).toContain('"type":"thinking"')
 })

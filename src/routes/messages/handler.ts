@@ -12,6 +12,7 @@ import {
   createChatCompletions,
   type ChatCompletionChunk,
 } from "~/services/copilot/create-chat-completions"
+import { createMessages } from "~/services/copilot/create-messages"
 
 import type { ChatCompletionResult } from "../chat-completions/types"
 
@@ -31,17 +32,23 @@ export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
 
+  const resolvedModel = resolveModel(anthropicPayload.model)
+  anthropicPayload.model = resolvedModel.resolvedModel
+
+  if (state.manualApprove) {
+    await awaitApproval()
+  }
+
+  if (shouldUseMessagesApi(resolvedModel)) {
+    return await handleMessagesApiRequest(c, anthropicPayload)
+  }
+
   const openAIPayload = translateToOpenAI(anthropicPayload)
-  const resolvedModel = resolveModel(openAIPayload.model)
   openAIPayload.model = resolvedModel.resolvedModel
   consola.debug(
     "Translated OpenAI request payload:",
     JSON.stringify(openAIPayload),
   )
-
-  if (state.manualApprove) {
-    await awaitApproval()
-  }
 
   const response = await createChatCompletions(openAIPayload)
 
@@ -112,3 +119,57 @@ const isNonStreaming = (
   response: ChatCompletionResult,
 ): response is Extract<ChatCompletionResult, { body: unknown }> =>
   Object.hasOwn(response, "body")
+
+function shouldUseMessagesApi(
+  resolvedModel: ReturnType<typeof resolveModel>,
+): boolean {
+  const model = resolvedModel.canonicalModel
+  const identifiers = [
+    resolvedModel.requestedModel,
+    resolvedModel.resolvedModel,
+    model?.id,
+    model?.name,
+    model?.capabilities.family,
+  ]
+    .filter(Boolean)
+    .map((value) => value.toLowerCase())
+
+  return identifiers.some((value) => value.includes("claude"))
+}
+
+async function handleMessagesApiRequest(
+  c: Context,
+  anthropicPayload: AnthropicMessagesPayload,
+) {
+  const response = await createMessages(anthropicPayload)
+
+  if ("body" in response) {
+    return new Response(response.body.body, {
+      status: 200,
+      headers: buildPassthroughHeaders(response.headers, "anthropic", {
+        includeContentType: true,
+      }),
+    })
+  }
+
+  const responseHeaders = buildPassthroughHeaders(
+    response.headers,
+    "anthropic",
+    {
+      streaming: true,
+    },
+  )
+  for (const [key, value] of responseHeaders.entries()) {
+    c.header(key, value)
+  }
+
+  return streamSSE(c, async (stream) => {
+    for await (const event of response.stream) {
+      await stream.writeSSE({
+        event: event.event,
+        data: event.data,
+        id: event.id,
+      })
+    }
+  })
+}
