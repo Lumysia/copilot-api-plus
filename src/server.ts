@@ -14,9 +14,10 @@ export const server = new Hono()
 
 server.use(safeRequestLogger)
 server.use(cors())
-server.use("*", requireApiKey)
 
 server.get("/", (c) => c.text("Server running"))
+
+server.use("*", requireApiKey)
 
 server.route("/chat/completions", completionRoutes)
 server.route("/models", modelRoutes)
