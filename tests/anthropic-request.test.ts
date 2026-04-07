@@ -62,6 +62,13 @@ function isValidChatCompletionRequest(payload: unknown): boolean {
   return result.success
 }
 
+function expectValidTranslatedPayload(payload: AnthropicMessagesPayload) {
+  const openAIPayload = translateToOpenAI(payload)
+  expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+
+  return openAIPayload
+}
+
 describe("Anthropic to OpenAI translation logic", () => {
   test("should translate minimal Anthropic payload to valid OpenAI payload", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
@@ -70,8 +77,7 @@ describe("Anthropic to OpenAI translation logic", () => {
       max_tokens: 0,
     }
 
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    expectValidTranslatedPayload(anthropicPayload)
   })
 
   test("should translate comprehensive Anthropic payload to valid OpenAI payload", () => {
@@ -99,8 +105,7 @@ describe("Anthropic to OpenAI translation logic", () => {
       ],
       tool_choice: { type: "auto" },
     }
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    expectValidTranslatedPayload(anthropicPayload)
   })
 
   test("should handle missing fields gracefully", () => {
@@ -109,8 +114,7 @@ describe("Anthropic to OpenAI translation logic", () => {
       messages: [{ role: "user", content: "Hello!" }],
       max_tokens: 0,
     }
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    expectValidTranslatedPayload(anthropicPayload)
   })
 
   test("should handle invalid types in Anthropic payload", () => {
@@ -124,7 +128,9 @@ describe("Anthropic to OpenAI translation logic", () => {
     // Should fail validation
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(false)
   })
+})
 
+describe("Anthropic thinking and tool translation", () => {
   test("should handle thinking blocks in assistant messages", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "claude-3-5-sonnet-20241022",
@@ -143,19 +149,86 @@ describe("Anthropic to OpenAI translation logic", () => {
       ],
       max_tokens: 100,
     }
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
 
     // Check that thinking content is combined with text content
     const assistantMessage = openAIPayload.messages.find(
       (m) => m.role === "assistant",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(assistantMessage?.content).toBe("2+2 equals 4.")
+    expect(assistantMessage?.reasoning_text).toBe(
       "Let me think about this simple math problem...",
     )
+    expect(assistantMessage?.reasoning_opaque).toBeUndefined()
     expect(assistantMessage?.content).toContain("2+2 equals 4.")
   })
 
+  test("should map thinking signatures to Copilot reasoning_opaque fields", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "Solve this" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking: "Tracing the reasoning path.",
+              signature: "sig_123",
+            },
+            { type: "text", text: "Here is the answer." },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+    const assistantMessage = openAIPayload.messages.find(
+      (message) => message.role === "assistant",
+    )
+
+    expect(assistantMessage?.reasoning_text).toBe("Tracing the reasoning path.")
+    expect(assistantMessage?.reasoning_opaque).toBe("sig_123")
+    expect(assistantMessage?.signature).toBeUndefined()
+  })
+})
+
+describe("Anthropic thinking request metadata translation", () => {
+  test("should request upstream reasoning summary and encrypted content when anthropic thinking is enabled", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-5.4",
+      messages: [{ role: "user", content: "Think carefully" }],
+      max_tokens: 100,
+      thinking: {
+        type: "enabled",
+        budget_tokens: 32,
+      },
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+
+    expect(openAIPayload.reasoning).toEqual({
+      summary: "detailed",
+    })
+    expect(openAIPayload.include).toEqual(["reasoning.encrypted_content"])
+  })
+
+  test("should not request upstream reasoning metadata when anthropic thinking is disabled", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-5.4",
+      messages: [{ role: "user", content: "Answer directly" }],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+
+    expect(openAIPayload.reasoning).toBeUndefined()
+    expect(openAIPayload.include).toBeUndefined()
+  })
+})
+
+describe("Anthropic tool translation", () => {
   test("should handle thinking blocks with tool calls", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "claude-3-5-sonnet-20241022",
@@ -181,14 +254,13 @@ describe("Anthropic to OpenAI translation logic", () => {
       ],
       max_tokens: 100,
     }
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
 
     // Check that thinking content is included in the message content
     const assistantMessage = openAIPayload.messages.find(
       (m) => m.role === "assistant",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(assistantMessage?.reasoning_text).toContain(
       "I need to call the weather API",
     )
     expect(assistantMessage?.content).toContain(
@@ -196,6 +268,117 @@ describe("Anthropic to OpenAI translation logic", () => {
     )
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
+  })
+
+  test("should translate tool_result content blocks into tool messages", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "Read this image" },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_1",
+              content: [
+                { type: "text", text: "found data" },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "abc123",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+    const toolMessage = openAIPayload.messages.find(
+      (message) => message.role === "tool",
+    )
+
+    expect(toolMessage).toEqual({
+      role: "tool",
+      tool_call_id: "tool_1",
+      content: [
+        { type: "text", text: "found data" },
+        {
+          type: "image_url",
+          image_url: {
+            url: "data:image/png;base64,abc123",
+          },
+        },
+      ],
+    })
+  })
+
+  test("should normalize anthropic tool schemas to Copilot tool parameter shape", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [{ role: "user", content: "Use a tool" }],
+      max_tokens: 100,
+      tools: [
+        {
+          name: "search_docs",
+          description: "Searches docs",
+          input_schema: {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            properties: {
+              query: { type: "string" },
+            },
+            required: ["query"],
+          },
+        },
+      ],
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+
+    expect(openAIPayload.tools).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "search_docs",
+          description: "Searches docs",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+            },
+            required: ["query"],
+          },
+        },
+      },
+    ])
+  })
+
+  test("should append a synthetic user continuation when translation ends on assistant", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "Start" },
+        { role: "assistant", content: "Continuing draft" },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+
+    expect(openAIPayload.messages.at(-2)).toEqual({
+      role: "assistant",
+      content: "Continuing draft",
+    })
+    expect(openAIPayload.messages.at(-1)).toEqual({
+      role: "user",
+      content: "Please continue.",
+    })
   })
 })
 

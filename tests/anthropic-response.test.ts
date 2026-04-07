@@ -20,6 +20,12 @@ const anthropicContentBlockTextSchema = z.object({
   text: z.string(),
 })
 
+const anthropicContentBlockThinkingSchema = z.object({
+  type: z.literal("thinking"),
+  thinking: z.string(),
+  signature: z.string().optional(),
+})
+
 const anthropicContentBlockToolUseSchema = z.object({
   type: z.literal("tool_use"),
   id: z.string(),
@@ -34,6 +40,7 @@ const anthropicMessageResponseSchema = z.object({
   content: z.array(
     z.union([
       anthropicContentBlockTextSchema,
+      anthropicContentBlockThinkingSchema,
       anthropicContentBlockToolUseSchema,
     ]),
   ),
@@ -160,6 +167,45 @@ describe("OpenAI to Anthropic Non-Streaming Response Translation", () => {
     }
   })
 
+  test("should translate Copilot reasoning fields into thinking blocks", () => {
+    const openAIResponse: ChatCompletionResponse = {
+      id: "chatcmpl-reasoning",
+      object: "chat.completion",
+      created: 1677652288,
+      model: "gpt-4o-2024-05-13",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "Answer text",
+            reasoning_opaque: "copilot-thinking-123",
+            reasoning_text: "copilot reasoning process",
+          },
+          finish_reason: "stop",
+          logprobs: null,
+        },
+      ],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        total_tokens: 30,
+      },
+    }
+
+    const anthropicResponse = translateToAnthropic(openAIResponse)
+
+    expect(anthropicResponse.content[0]).toEqual({
+      type: "thinking",
+      thinking: "copilot reasoning process",
+      signature: "copilot-thinking-123",
+    })
+    expect(anthropicResponse.content[1]).toEqual({
+      type: "text",
+      text: "Answer text",
+    })
+  })
+
   test("should translate a response stopped due to length", () => {
     const openAIResponse: ChatCompletionResponse = {
       id: "chatcmpl-789",
@@ -188,6 +234,161 @@ describe("OpenAI to Anthropic Non-Streaming Response Translation", () => {
 
     expect(isValidAnthropicResponse(anthropicResponse)).toBe(true)
     expect(anthropicResponse.stop_reason).toBe("max_tokens")
+  })
+})
+
+describe("OpenAI to Anthropic Streaming Response Translation", () => {
+  test("should translate stream reasoning fields into thinking deltas", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-thinking",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_text: "Analy", reasoning_opaque: "cot-1" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-thinking",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_text: "zing" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-thinking",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "stop", logprobs: null },
+        ],
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+    }
+    const translatedStream = openAIStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+
+    expect(translatedStream).toContainEqual({
+      type: "content_block_start",
+      index: 0,
+      content_block: {
+        type: "thinking",
+        thinking: "Analy",
+        signature: "cot-1",
+      },
+    })
+    expect(translatedStream).toContainEqual({
+      type: "content_block_delta",
+      index: 0,
+      delta: {
+        type: "thinking_delta",
+        thinking: "Analy",
+      },
+    })
+    expect(translatedStream).toContainEqual({
+      type: "content_block_delta",
+      index: 0,
+      delta: {
+        type: "signature_delta",
+        signature: "cot-1",
+      },
+    })
+    expect(translatedStream).toContainEqual({
+      type: "content_block_delta",
+      index: 0,
+      delta: {
+        type: "thinking_delta",
+        thinking: "zing",
+      },
+    })
+  })
+
+  test("should close thinking blocks before starting text blocks", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-mixed",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: { reasoning_text: "Plan" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-mixed",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: { content: "Answer" },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-mixed",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "stop", logprobs: null },
+        ],
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      currentContentBlockType: undefined,
+      toolCalls: {},
+    }
+
+    const translatedStream = openAIStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+
+    const thinkingStopIndex = translatedStream.findIndex(
+      (event) => event.type === "content_block_stop" && event.index === 0,
+    )
+    const textStartIndex = translatedStream.findIndex(
+      (event) =>
+        event.type === "content_block_start"
+        && event.index === 1
+        && event.content_block.type === "text",
+    )
+
+    expect(thinkingStopIndex).toBeGreaterThan(-1)
+    expect(textStartIndex).toBeGreaterThan(thinkingStopIndex)
   })
 })
 
@@ -251,6 +452,7 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
       messageStartSent: false,
       contentBlockIndex: 0,
       contentBlockOpen: false,
+      currentContentBlockType: undefined,
       toolCalls: {},
     }
     const translatedStream = openAIStream.flatMap((chunk) =>
@@ -351,6 +553,7 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
       messageStartSent: false,
       contentBlockIndex: 0,
       contentBlockOpen: false,
+      currentContentBlockType: undefined,
       toolCalls: {},
     }
     const translatedStream = openAIStream.flatMap((chunk) =>

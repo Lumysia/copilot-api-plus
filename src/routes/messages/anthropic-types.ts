@@ -42,7 +42,7 @@ export interface AnthropicImageBlock {
 export interface AnthropicToolResultBlock {
   type: "tool_result"
   tool_use_id: string
-  content: string
+  content: string | Array<AnthropicTextBlock | AnthropicImageBlock>
   is_error?: boolean
 }
 
@@ -56,6 +56,7 @@ export interface AnthropicToolUseBlock {
 export interface AnthropicThinkingBlock {
   type: "thinking"
   thinking: string
+  signature?: string
 }
 
 export type AnthropicUserContentBlock =
@@ -133,7 +134,7 @@ export interface AnthropicContentBlockStartEvent {
     | (Omit<AnthropicToolUseBlock, "input"> & {
         input: Record<string, unknown>
       })
-    | { type: "thinking"; thinking: string }
+    | { type: "thinking"; thinking: string; signature?: string }
 }
 
 export interface AnthropicContentBlockDeltaEvent {
@@ -196,6 +197,7 @@ export interface AnthropicStreamState {
   messageStartSent: boolean
   contentBlockIndex: number
   contentBlockOpen: boolean
+  currentContentBlockType?: "thinking" | "text" | "tool_use"
   toolCalls: {
     [openAIToolIndex: number]: {
       id: string

@@ -28,6 +28,12 @@ interface ModelSupports {
   tool_calls?: boolean
   parallel_tool_calls?: boolean
   dimensions?: boolean
+  vision?: boolean
+  thinking?: boolean
+  reasoning_effort?: boolean
+  adaptive_thinking?: boolean
+  min_thinking_budget?: number
+  max_thinking_budget?: number
 }
 
 interface ModelCapabilities {
