@@ -4,7 +4,7 @@ export interface AnthropicMessagesPayload {
   model: string
   messages: Array<AnthropicMessage>
   max_tokens: number
-  system?: string | Array<AnthropicTextBlock>
+  system?: string | Array<AnthropicSystemContentBlock>
   metadata?: {
     user_id?: string
   }
@@ -53,6 +53,11 @@ export type AnthropicContextManagementEdit =
 export interface AnthropicTextBlock {
   type: "text"
   text: string
+  cache_control?: AnthropicCacheControl
+}
+
+export interface AnthropicCacheControl {
+  type: "ephemeral"
 }
 
 export interface AnthropicImageBlock {
@@ -62,6 +67,7 @@ export interface AnthropicImageBlock {
     media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp"
     data: string
   }
+  cache_control?: AnthropicCacheControl
 }
 
 export interface AnthropicToolResultBlock {
@@ -69,6 +75,7 @@ export interface AnthropicToolResultBlock {
   tool_use_id: string
   content: string | Array<AnthropicTextBlock | AnthropicImageBlock>
   is_error?: boolean
+  cache_control?: AnthropicCacheControl
 }
 
 export interface AnthropicToolUseBlock {
@@ -110,7 +117,10 @@ export interface AnthropicTool {
   name: string
   description?: string
   input_schema: Record<string, unknown>
+  cache_control?: AnthropicCacheControl
 }
+
+export type AnthropicSystemContentBlock = AnthropicTextBlock
 
 export interface AnthropicResponse {
   id: string

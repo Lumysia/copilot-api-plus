@@ -551,6 +551,117 @@ test("adds context-management beta when forwarding anthropic context_management"
   })
 })
 
+test("normalizes cache_control payloads for claude code compatibility", async () => {
+  let forwardedBody: Record<string, unknown> | undefined
+
+  globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+    const requestBody = typeof init?.body === "string" ? init.body : "{}"
+    forwardedBody = JSON.parse(requestBody) as Record<string, unknown>
+
+    return new Response(
+      JSON.stringify({
+        id: "msg_claude_cache_control",
+        type: "message",
+        role: "assistant",
+        model: "Claude Sonnet 4.6",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4.6",
+      max_tokens: 256,
+      system: [
+        { type: "text", text: "You are helpful." },
+        {
+          type: "text",
+          text: "Cache me",
+          cache_control: {
+            type: "ephemeral",
+            ephemeral: { scope: "conversation" },
+          },
+        },
+      ],
+      tools: [
+        {
+          name: "read_file",
+          input_schema: { type: "object" },
+          cache_control: {
+            type: "ephemeral",
+            ephemeral: { scope: "tool" },
+          },
+        },
+      ],
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "hello",
+              cache_control: {
+                type: "ephemeral",
+                ephemeral: { scope: "message" },
+              },
+            },
+          ],
+        },
+      ],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(forwardedBody).toMatchObject({
+    system: [
+      { type: "text", text: "You are helpful." },
+      {
+        type: "text",
+        text: "Cache me",
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    tools: [
+      {
+        name: "read_file",
+        input_schema: { type: "object" },
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "hello",
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+      },
+    ],
+  })
+})
+
 test("streams claude messages api events without chat-completions translation", async () => {
   globalThis.fetch = ((_url: string | URL | Request, _init?: RequestInit) => {
     return new Response(
