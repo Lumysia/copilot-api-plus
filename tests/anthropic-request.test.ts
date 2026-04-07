@@ -150,7 +150,8 @@ describe("Anthropic to OpenAI translation logic", () => {
     const assistantMessage = openAIPayload.messages.find(
       (m) => m.role === "assistant",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(assistantMessage?.content).toBe("2+2 equals 4.")
+    expect(assistantMessage?.reasoning_text).toBe(
       "Let me think about this simple math problem...",
     )
     expect(assistantMessage?.content).toContain("2+2 equals 4.")
@@ -188,7 +189,7 @@ describe("Anthropic to OpenAI translation logic", () => {
     const assistantMessage = openAIPayload.messages.find(
       (m) => m.role === "assistant",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(assistantMessage?.reasoning_text).toContain(
       "I need to call the weather API",
     )
     expect(assistantMessage?.content).toContain(
@@ -196,6 +197,55 @@ describe("Anthropic to OpenAI translation logic", () => {
     )
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
+  })
+
+  test("should translate tool_result content blocks into tool messages", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "Read this image" },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_1",
+              content: [
+                { type: "text", text: "found data" },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "abc123",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    const toolMessage = openAIPayload.messages.find(
+      (message) => message.role === "tool",
+    )
+
+    expect(toolMessage).toEqual({
+      role: "tool",
+      tool_call_id: "tool_1",
+      content: [
+        { type: "text", text: "found data" },
+        {
+          type: "image_url",
+          image_url: {
+            url: "data:image/png;base64,abc123",
+          },
+        },
+      ],
+    })
   })
 })
 

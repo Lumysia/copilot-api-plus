@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 
 import { forwardError } from "~/lib/error"
+import { getPublicModels } from "~/lib/models"
 import { state } from "~/lib/state"
 import { cacheModels } from "~/lib/utils"
 
@@ -13,19 +14,9 @@ modelRoutes.get("/", async (c) => {
       await cacheModels()
     }
 
-    const models = state.models?.data.map((model) => ({
-      id: model.id,
-      object: "model",
-      type: "model",
-      created: 0, // No date available from source
-      created_at: new Date(0).toISOString(), // No date available from source
-      owned_by: model.vendor,
-      display_name: model.name,
-    }))
-
     return c.json({
       object: "list",
-      data: models,
+      data: getPublicModels(),
       has_more: false,
     })
   } catch (error) {

@@ -4,13 +4,16 @@ import consola from "consola"
 import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
+import { resolveModel } from "~/lib/models"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
+import { buildPassthroughHeaders } from "~/lib/transport"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
-  type ChatCompletionResponse,
 } from "~/services/copilot/create-chat-completions"
+
+import type { ChatCompletionResult } from "../chat-completions/types"
 
 import {
   type AnthropicMessagesPayload,
@@ -29,6 +32,8 @@ export async function handleCompletion(c: Context) {
   consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
 
   const openAIPayload = translateToOpenAI(anthropicPayload)
+  const resolvedModel = resolveModel(openAIPayload.model)
+  openAIPayload.model = resolvedModel.resolvedModel
   consola.debug(
     "Translated OpenAI request payload:",
     JSON.stringify(openAIPayload),
@@ -43,26 +48,43 @@ export async function handleCompletion(c: Context) {
   if (isNonStreaming(response)) {
     consola.debug(
       "Non-streaming response from Copilot:",
-      JSON.stringify(response).slice(-400),
+      JSON.stringify(response.body).slice(-400),
     )
-    const anthropicResponse = translateToAnthropic(response)
+    const anthropicResponse = translateToAnthropic(response.body)
     consola.debug(
       "Translated Anthropic response:",
       JSON.stringify(anthropicResponse),
     )
-    return c.json(anthropicResponse)
+    return new Response(JSON.stringify(anthropicResponse), {
+      status: 200,
+      headers: buildPassthroughHeaders(response.headers, "anthropic", {
+        includeContentType: true,
+      }),
+    })
   }
 
   consola.debug("Streaming response from Copilot")
+  const responseHeaders = buildPassthroughHeaders(
+    response.headers,
+    "anthropic",
+    {
+      streaming: true,
+    },
+  )
+  for (const [key, value] of responseHeaders.entries()) {
+    c.header(key, value)
+  }
+
   return streamSSE(c, async (stream) => {
     const streamState: AnthropicStreamState = {
       messageStartSent: false,
       contentBlockIndex: 0,
       contentBlockOpen: false,
+      currentContentBlockType: undefined,
       toolCalls: {},
     }
 
-    for await (const rawEvent of response) {
+    for await (const rawEvent of response.stream) {
       consola.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
       if (rawEvent.data === "[DONE]") {
         break
@@ -87,5 +109,6 @@ export async function handleCompletion(c: Context) {
 }
 
 const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
+  response: ChatCompletionResult,
+): response is Extract<ChatCompletionResult, { body: unknown }> =>
+  Object.hasOwn(response, "body")

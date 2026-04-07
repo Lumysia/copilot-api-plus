@@ -1,16 +1,29 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
+import type { ChatCompletionResult } from "~/routes/chat-completions/types"
+
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
-) => {
+): Promise<ChatCompletionResult> => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const enableVision = payload.messages.some(
+  const normalizedPayload: ChatCompletionsPayload = {
+    ...payload,
+    max_tokens: payload.max_tokens ?? payload.max_completion_tokens ?? null,
+    stream_options:
+      payload.stream ? { include_usage: true } : payload.stream_options,
+    messages: payload.messages.map((message) => ({
+      ...message,
+      role: message.role === "developer" ? "system" : message.role,
+    })),
+  }
+
+  const enableVision = normalizedPayload.messages.some(
     (x) =>
       typeof x.content !== "string"
       && x.content?.some((x) => x.type === "image_url"),
@@ -18,7 +31,7 @@ export const createChatCompletions = async (
 
   // Agent/user check for X-Initiator header
   // Determine if any message is from an agent ("assistant" or "tool")
-  const isAgentCall = payload.messages.some((msg) =>
+  const isAgentCall = normalizedPayload.messages.some((msg) =>
     ["assistant", "tool"].includes(msg.role),
   )
 
@@ -31,7 +44,7 @@ export const createChatCompletions = async (
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify(payload),
+    body: JSON.stringify(normalizedPayload),
   })
 
   if (!response.ok) {
@@ -39,11 +52,17 @@ export const createChatCompletions = async (
     throw new HTTPError("Failed to create chat completions", response)
   }
 
-  if (payload.stream) {
-    return events(response)
+  if (normalizedPayload.stream) {
+    return {
+      headers: new Headers(response.headers),
+      stream: events(response),
+    }
   }
 
-  return (await response.json()) as ChatCompletionResponse
+  return {
+    headers: new Headers(response.headers),
+    body: (await response.json()) as ChatCompletionResponse,
+  }
 }
 
 // Streaming types
@@ -69,8 +88,14 @@ export interface ChatCompletionChunk {
   }
 }
 
-interface Delta {
+export interface Delta {
   content?: string | null
+  reasoning_opaque?: string
+  reasoning_text?: string
+  cot_id?: string
+  cot_summary?: string
+  thinking?: string
+  signature?: string
   role?: "user" | "assistant" | "system" | "tool"
   tool_calls?: Array<{
     index: number
@@ -109,9 +134,15 @@ export interface ChatCompletionResponse {
   }
 }
 
-interface ResponseMessage {
+export interface ResponseMessage {
   role: "assistant"
   content: string | null
+  reasoning_opaque?: string
+  reasoning_text?: string
+  cot_id?: string
+  cot_summary?: string
+  thinking?: string
+  signature?: string
   tool_calls?: Array<ToolCall>
 }
 
@@ -130,9 +161,13 @@ export interface ChatCompletionsPayload {
   temperature?: number | null
   top_p?: number | null
   max_tokens?: number | null
+  max_completion_tokens?: number | null
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null
+  stream_options?: {
+    include_usage?: boolean
+  } | null
 
   frequency_penalty?: number | null
   presence_penalty?: number | null
@@ -162,6 +197,12 @@ export interface Tool {
 export interface Message {
   role: "user" | "assistant" | "system" | "tool" | "developer"
   content: string | Array<ContentPart> | null
+  reasoning_opaque?: string
+  reasoning_text?: string
+  cot_id?: string
+  cot_summary?: string
+  thinking?: string
+  signature?: string
 
   name?: string
   tool_calls?: Array<ToolCall>

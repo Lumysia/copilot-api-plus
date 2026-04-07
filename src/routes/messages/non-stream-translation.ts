@@ -2,7 +2,9 @@ import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
   type ContentPart,
+  type Delta,
   type Message,
+  type ResponseMessage,
   type TextPart,
   type Tool,
   type ToolCall,
@@ -103,7 +105,7 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
       newMessages.push({
         role: "tool",
         tool_call_id: block.tool_use_id,
-        content: mapContent(block.content),
+        content: mapToolResultContent(block.content),
       })
     }
 
@@ -143,21 +145,23 @@ function handleAssistantMessage(
     (block): block is AnthropicTextBlock => block.type === "text",
   )
 
-  const thinkingBlocks = message.content.filter(
+  const primaryThinkingBlock = message.content.find(
     (block): block is AnthropicThinkingBlock => block.type === "thinking",
   )
 
-  // Combine text and thinking blocks, as OpenAI doesn't have separate thinking blocks
-  const allTextContent = [
-    ...textBlocks.map((b) => b.text),
-    ...thinkingBlocks.map((b) => b.thinking),
-  ].join("\n\n")
+  const allTextContent = textBlocks.map((b) => b.text).join("\n\n")
 
   return toolUseBlocks.length > 0 ?
       [
         {
           role: "assistant",
           content: allTextContent || null,
+          ...(primaryThinkingBlock === undefined ?
+            {}
+          : {
+              reasoning_text: primaryThinkingBlock.thinking,
+              signature: primaryThinkingBlock.signature,
+            }),
           tool_calls: toolUseBlocks.map((toolUse) => ({
             id: toolUse.id,
             type: "function",
@@ -171,9 +175,25 @@ function handleAssistantMessage(
     : [
         {
           role: "assistant",
-          content: mapContent(message.content),
+          content: allTextContent || null,
+          ...(primaryThinkingBlock === undefined ?
+            {}
+          : {
+              reasoning_text: primaryThinkingBlock.thinking,
+              signature: primaryThinkingBlock.signature,
+            }),
         },
       ]
+}
+
+function mapToolResultContent(
+  content: AnthropicToolResultBlock["content"],
+): string | Array<ContentPart> | null {
+  if (typeof content === "string") {
+    return content
+  }
+
+  return mapContent(content)
 }
 
 function mapContent(
@@ -278,38 +298,82 @@ function translateAnthropicToolChoiceToOpenAI(
 
 // Response translation
 
+function getThinkingText(
+  thinking: Delta | ResponseMessage,
+): string | undefined {
+  if (thinking.cot_summary) {
+    return thinking.cot_summary
+  }
+  if (thinking.reasoning_text) {
+    return thinking.reasoning_text
+  }
+  if (thinking.thinking) {
+    return thinking.thinking
+  }
+  return undefined
+}
+
+function getThinkingId(thinking: Delta | ResponseMessage): string | undefined {
+  if (thinking.cot_id) {
+    return thinking.cot_id
+  }
+  if (thinking.reasoning_opaque) {
+    return thinking.reasoning_opaque
+  }
+  if (thinking.signature) {
+    return thinking.signature
+  }
+  return undefined
+}
+
+function getAnthropicThinkingBlocks(
+  message: ResponseMessage,
+): Array<AnthropicThinkingBlock> {
+  const text = getThinkingText(message)
+  const id = getThinkingId(message)
+
+  if (!text && !id) {
+    return []
+  }
+
+  return [
+    {
+      type: "thinking",
+      thinking: text ?? "",
+      ...(id ? { signature: id } : {}),
+    },
+  ]
+}
+
 export function translateToAnthropic(
   response: ChatCompletionResponse,
 ): AnthropicResponse {
-  // Merge content from all choices
   const allTextBlocks: Array<AnthropicTextBlock> = []
+  const allThinkingBlocks: Array<AnthropicThinkingBlock> = []
   const allToolUseBlocks: Array<AnthropicToolUseBlock> = []
   let stopReason: "stop" | "length" | "tool_calls" | "content_filter" | null =
-    null // default
-  stopReason = response.choices[0]?.finish_reason ?? stopReason
+    response.choices[0]?.finish_reason ?? null
 
-  // Process all choices to extract text and tool use blocks
   for (const choice of response.choices) {
     const textBlocks = getAnthropicTextBlocks(choice.message.content)
+    const thinkingBlocks = getAnthropicThinkingBlocks(choice.message)
     const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
 
     allTextBlocks.push(...textBlocks)
+    allThinkingBlocks.push(...thinkingBlocks)
     allToolUseBlocks.push(...toolUseBlocks)
 
-    // Use the finish_reason from the first choice, or prioritize tool_calls
-    if (choice.finish_reason === "tool_calls" || stopReason === "stop") {
+    if (choice.finish_reason === "tool_calls") {
       stopReason = choice.finish_reason
     }
   }
-
-  // Note: GitHub Copilot doesn't generate thinking blocks, so we don't include them in responses
 
   return {
     id: response.id,
     type: "message",
     role: "assistant",
     model: response.model,
-    content: [...allTextBlocks, ...allToolUseBlocks],
+    content: [...allThinkingBlocks, ...allTextBlocks, ...allToolUseBlocks],
     stop_reason: mapOpenAIStopReasonToAnthropic(stopReason),
     stop_sequence: null,
     usage: {

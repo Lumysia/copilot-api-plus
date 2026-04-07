@@ -1,28 +1,44 @@
 import type { Context } from "hono"
 
 import consola from "consola"
-import { streamSSE, type SSEMessage } from "hono/streaming"
+import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
+import { resolveModel } from "~/lib/models"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
+import { buildPassthroughHeaders } from "~/lib/transport"
 import { isNullish } from "~/lib/utils"
 import {
   createChatCompletions,
-  type ChatCompletionResponse,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
+
+import type { ChatCompletionResult } from "./types"
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   let payload = await c.req.json<ChatCompletionsPayload>()
+  if (
+    isNullish(payload.max_tokens)
+    && !isNullish(payload.max_completion_tokens)
+  ) {
+    payload = {
+      ...payload,
+      max_tokens: payload.max_completion_tokens,
+    }
+  }
   consola.debug("Request payload:", JSON.stringify(payload).slice(-400))
 
-  // Find the selected model
+  const resolvedModel = resolveModel(payload.model)
+  payload = {
+    ...payload,
+    model: resolvedModel.resolvedModel,
+  }
   const selectedModel = state.models?.data.find(
-    (model) => model.id === payload.model,
+    (model) => model.id === resolvedModel.resolvedModel,
   )
 
   // Calculate and display token count
@@ -50,19 +66,41 @@ export async function handleCompletion(c: Context) {
   const response = await createChatCompletions(payload)
 
   if (isNonStreaming(response)) {
-    consola.debug("Non-streaming response:", JSON.stringify(response))
-    return c.json(response)
+    consola.debug("Non-streaming response:", JSON.stringify(response.body))
+    return new Response(JSON.stringify(response.body), {
+      status: 200,
+      headers: buildPassthroughHeaders(response.headers, "openai", {
+        includeContentType: true,
+      }),
+    })
   }
 
   consola.debug("Streaming response")
+  const responseHeaders = buildPassthroughHeaders(response.headers, "openai", {
+    streaming: true,
+  })
+  for (const [key, value] of responseHeaders.entries()) {
+    c.header(key, value)
+  }
+
   return streamSSE(c, async (stream) => {
-    for await (const chunk of response) {
+    let sawDone = false
+
+    for await (const chunk of response.stream) {
       consola.debug("Streaming chunk:", JSON.stringify(chunk))
-      await stream.writeSSE(chunk as SSEMessage)
+      if (chunk.data === "[DONE]") {
+        sawDone = true
+      }
+      await stream.writeSSE(chunk)
+    }
+
+    if (!sawDone) {
+      await stream.writeSSE({ data: "[DONE]" })
     }
   })
 }
 
 const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
+  response: ChatCompletionResult,
+): response is Extract<ChatCompletionResult, { body: unknown }> =>
+  Object.hasOwn(response, "body")

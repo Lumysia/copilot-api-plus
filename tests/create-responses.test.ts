@@ -18,9 +18,25 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
+function getRequestInit(callIndex: number = 0): RequestInit {
+  return (fetchMock.mock.calls[callIndex]?.[1] as RequestInit | undefined) ?? {}
+}
+
+function parseRequestBody(callIndex: number = 0): ResponsesPayload {
+  const body = getRequestInit(callIndex).body
+
+  if (typeof body !== "string") {
+    throw new TypeError("Expected request body to be a JSON string")
+  }
+
+  return JSON.parse(body) as ResponsesPayload
+}
+
+let fetchMock: ReturnType<typeof mock>
+
 test("posts payload to copilot responses endpoint", async () => {
   const responseBody = JSON.stringify({ id: "resp_123", object: "response" })
-  const fetchMock = mock((_url: string, _opts?: RequestInit) =>
+  fetchMock = mock((_url: string, _opts?: RequestInit) =>
     Promise.resolve(
       new Response(responseBody, {
         status: 200,
@@ -47,8 +63,94 @@ test("posts payload to copilot responses endpoint", async () => {
   expect(await response.json()).toEqual({ id: "resp_123", object: "response" })
 })
 
+test("normalizes responses payload toward copilot upstream semantics", async () => {
+  fetchMock = mock((_url: string, _opts?: RequestInit) =>
+    Promise.resolve(
+      new Response(JSON.stringify({ id: "resp_456", object: "response" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+  )
+  globalThis.fetch = fetchMock as unknown as typeof fetch
+
+  await createResponses({
+    model: "gpt-4.1",
+    max_tokens: 321,
+    input: [
+      {
+        type: "message",
+        role: "developer",
+        content: [{ type: "input_text", text: "system rule" }],
+      },
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "prior answer" }],
+      },
+    ],
+  })
+
+  const requestInit = getRequestInit()
+  const headers = new Headers(requestInit.headers)
+  const requestBody = parseRequestBody()
+
+  expect(headers.get("X-Initiator")).toBe("agent")
+  expect(requestBody.max_output_tokens).toBe(321)
+  expect(requestBody.store).toBe(false)
+  expect(requestBody.truncation).toBe("disabled")
+  expect(requestBody.include).toContain("reasoning.encrypted_content")
+  expect(requestBody.input).toEqual([
+    {
+      type: "message",
+      role: "system",
+      content: [{ type: "input_text", text: "system rule" }],
+    },
+    {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "prior answer" }],
+    },
+  ])
+})
+
+test("preserves caller supplied responses-specific fields", async () => {
+  fetchMock = mock((_url: string, _opts?: RequestInit) =>
+    Promise.resolve(
+      new Response(JSON.stringify({ id: "resp_789", object: "response" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+  )
+  globalThis.fetch = fetchMock as unknown as typeof fetch
+
+  await createResponses({
+    model: "gpt-4.1",
+    previous_response_id: "resp_prev",
+    max_output_tokens: 111,
+    truncation: "auto",
+    include: ["file_search_call.results"],
+    reasoning: { effort: "high", summary: "detailed" },
+    store: true,
+    input: "hello",
+  })
+
+  const requestBody = parseRequestBody()
+
+  expect(requestBody.previous_response_id).toBe("resp_prev")
+  expect(requestBody.max_output_tokens).toBe(111)
+  expect(requestBody.truncation).toBe("auto")
+  expect(requestBody.store).toBe(true)
+  expect(requestBody.reasoning).toEqual({ effort: "high", summary: "detailed" })
+  expect(requestBody.include).toEqual([
+    "file_search_call.results",
+    "reasoning.encrypted_content",
+  ])
+})
+
 test("preserves streaming response metadata", async () => {
-  const fetchMock = mock((_url: string, _opts?: RequestInit) =>
+  fetchMock = mock((_url: string, _opts?: RequestInit) =>
     Promise.resolve(
       new Response("data: hello\n\n", {
         status: 200,
