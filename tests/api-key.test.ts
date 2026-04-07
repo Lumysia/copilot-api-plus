@@ -27,6 +27,13 @@ test("rejects request without presenting an API key", async () => {
   })
 })
 
+test("allows unauthenticated requests to root health endpoint", async () => {
+  const response = await server.request("http://localhost/")
+
+  expect(response.status).toBe(200)
+  expect(await response.text()).toBe("Server running")
+})
+
 test("accepts bearer token authentication", async () => {
   const response = await server.request("http://localhost/", {
     headers: {
@@ -58,7 +65,7 @@ test("allows requests when API key protection is disabled", async () => {
   expect(await response.text()).toBe("Server running")
 })
 
-test("uses proxy headers for auth failure rate limiting", async () => {
+test("uses proxy headers when rejecting unauthorized requests", async () => {
   for (let index = 0; index < 10; index += 1) {
     const response = await server.request("http://localhost/v1/models", {
       headers: {
@@ -69,13 +76,13 @@ test("uses proxy headers for auth failure rate limiting", async () => {
     expect(response.status).toBe(401)
   }
 
-  const blockedResponse = await server.request("http://localhost/v1/models", {
+  const repeatedResponse = await server.request("http://localhost/v1/models", {
     headers: {
       "x-forwarded-for": "203.0.113.10, 127.0.0.1",
     },
   })
 
-  expect(blockedResponse.status).toBe(429)
+  expect(repeatedResponse.status).toBe(401)
 })
 
 test("successful authentication clears previous auth failures", async () => {
@@ -96,4 +103,16 @@ test("successful authentication clears previous auth failures", async () => {
 
   expect(successResponse.status).toBe(200)
   expect(state.authFailures.has("198.51.100.1")).toBe(false)
+})
+
+test("still protects non-root endpoints", async () => {
+  const response = await server.request("http://localhost/models")
+
+  expect(response.status).toBe(401)
+  expect(await response.json()).toEqual({
+    error: {
+      message: "Invalid API key",
+      type: "authentication_error",
+    },
+  })
 })
