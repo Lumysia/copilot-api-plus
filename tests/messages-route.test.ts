@@ -401,7 +401,7 @@ test("routes claude `/v1/messages` requests to upstream messages api", async () 
   )
   expect(forwardedBody).toMatchObject({
     model: "claude-sonnet-4.6",
-    thinking: { type: "enabled", budget_tokens: 128 },
+    thinking: { type: "enabled", budget_tokens: 1024 },
   })
 
   expect(await response.json()).toEqual({
@@ -426,6 +426,58 @@ test("routes claude `/v1/messages` requests to upstream messages api", async () 
       input_tokens: 10,
       output_tokens: 12,
     },
+  })
+})
+
+test("normalizes claude thinking budget to upstream minimum for messages api", async () => {
+  let forwardedBody: Record<string, unknown> | undefined
+
+  globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+    const requestBody = typeof init?.body === "string" ? init.body : "{}"
+    forwardedBody = JSON.parse(requestBody) as Record<string, unknown>
+
+    return new Response(
+      JSON.stringify({
+        id: "msg_claude_budget",
+        type: "message",
+        role: "assistant",
+        model: "Claude Sonnet 4.6",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4.6",
+      max_tokens: 256,
+      thinking: { type: "enabled", budget_tokens: 128 },
+      messages: [{ role: "user", content: "hello" }],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(forwardedBody?.thinking).toEqual({
+    type: "enabled",
+    budget_tokens: 1024,
   })
 })
 
