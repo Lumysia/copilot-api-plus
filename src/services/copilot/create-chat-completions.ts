@@ -12,14 +12,32 @@ export const createChatCompletions = async (
 ): Promise<ChatCompletionResult> => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
+  const { max_completion_tokens, stream_options, ...restPayload } = payload
+  const hasMaxTokens =
+    payload.max_tokens !== null && payload.max_tokens !== undefined
+  const hasMaxCompletionTokens =
+    max_completion_tokens !== null && max_completion_tokens !== undefined
+  const normalizedStreamOptions =
+    payload.stream ?
+      {
+        ...stream_options,
+        include_usage: true,
+      }
+    : stream_options
   const normalizedPayload: ChatCompletionsPayload = {
-    ...payload,
-    max_tokens: payload.max_tokens ?? payload.max_completion_tokens ?? null,
-    stream_options:
-      payload.stream ? { include_usage: true } : payload.stream_options,
+    ...restPayload,
+    ...(hasMaxTokens || hasMaxCompletionTokens ?
+      {
+        max_tokens: payload.max_tokens ?? max_completion_tokens,
+      }
+    : {}),
+    ...(normalizedStreamOptions ?
+      { stream_options: normalizedStreamOptions }
+    : {}),
     messages: payload.messages.map((message) => ({
       ...message,
       role: message.role === "developer" ? "system" : message.role,
+      content: normalizeMessageContent(message.content),
     })),
   }
 
@@ -55,7 +73,19 @@ export const createChatCompletions = async (
   if (normalizedPayload.stream) {
     return {
       headers: new Headers(response.headers),
-      stream: events(response),
+      stream: (async function* () {
+        for await (const event of events(response)) {
+          if (typeof event.data !== "string") {
+            continue
+          }
+
+          yield {
+            data: event.data,
+            event: event.event,
+            id: typeof event.id === "undefined" ? undefined : String(event.id),
+          }
+        }
+      })(),
     }
   }
 
@@ -63,6 +93,29 @@ export const createChatCompletions = async (
     headers: new Headers(response.headers),
     body: (await response.json()) as ChatCompletionResponse,
   }
+}
+
+function normalizeMessageContent(
+  content: Message["content"],
+): Message["content"] {
+  if (typeof content === "string") {
+    return content.trimEnd()
+  }
+
+  if (!Array.isArray(content)) {
+    return content
+  }
+
+  return content.map((part) => {
+    if (part.type !== "text") {
+      return part
+    }
+
+    return {
+      ...part,
+      text: part.text.trimEnd(),
+    }
+  })
 }
 
 // Streaming types

@@ -97,6 +97,7 @@ test("normalizes responses payload toward copilot upstream semantics", async () 
 
   expect(headers.get("X-Initiator")).toBe("agent")
   expect(requestBody.max_output_tokens).toBe(321)
+  expect("max_tokens" in requestBody).toBe(false)
   expect(requestBody.store).toBe(false)
   expect(requestBody.truncation).toBe("disabled")
   expect(requestBody.include).toContain("reasoning.encrypted_content")
@@ -112,6 +113,67 @@ test("normalizes responses payload toward copilot upstream semantics", async () 
       content: [{ type: "output_text", text: "prior answer" }],
     },
   ])
+})
+
+test("normalizes responses tools and tool_choice to upstream wire shape", async () => {
+  fetchMock = mock((_url: string, _opts?: RequestInit) =>
+    Promise.resolve(
+      new Response(JSON.stringify({ id: "resp_tools", object: "response" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+  )
+  globalThis.fetch = fetchMock as unknown as typeof fetch
+
+  await createResponses({
+    model: "gpt-4.1",
+    input: "hello",
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "search_workspace",
+          description: "Search the workspace",
+        },
+      },
+      {
+        type: "function",
+        name: "read_file",
+      },
+    ],
+    tool_choice: {
+      type: "function",
+      function: {
+        name: "search_workspace",
+      },
+    },
+  })
+
+  const requestBody = parseRequestBody() as ResponsesPayload & {
+    tools: Array<Record<string, unknown>>
+    tool_choice: Record<string, unknown>
+  }
+
+  expect(requestBody.tools).toEqual([
+    {
+      type: "function",
+      name: "search_workspace",
+      description: "Search the workspace",
+      strict: false,
+      parameters: {},
+    },
+    {
+      type: "function",
+      name: "read_file",
+      strict: false,
+      parameters: {},
+    },
+  ])
+  expect(requestBody.tool_choice).toEqual({
+    type: "function",
+    name: "search_workspace",
+  })
 })
 
 test("preserves caller supplied responses-specific fields", async () => {

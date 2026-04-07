@@ -77,6 +77,7 @@ test("maps max_completion_tokens to max_tokens before forwarding", async () => {
   ) as ChatCompletionsPayload
 
   expect(forwardedBody.max_tokens).toBe(321)
+  expect("max_completion_tokens" in forwardedBody).toBe(false)
 })
 
 test("normalizes developer role to system before forwarding", async () => {
@@ -110,6 +111,55 @@ test("adds stream_options.include_usage for streaming requests", async () => {
   ) as ChatCompletionsPayload
 
   expect(forwardedBody.stream_options).toEqual({ include_usage: true })
+})
+
+test("preserves caller stream options while forcing include_usage", async () => {
+  fetchMock.mockClear()
+  const payload: ChatCompletionsPayload = {
+    messages: [{ role: "user", content: "stream please" }],
+    model: "gpt-test",
+    stream: true,
+    stream_options: { include_usage: false },
+  }
+
+  await createChatCompletions(payload)
+
+  const forwardedBody = JSON.parse(
+    getLastForwardedRequest().body,
+  ) as ChatCompletionsPayload
+
+  expect(forwardedBody.stream_options).toEqual({ include_usage: true })
+})
+
+test("trims trailing whitespace from outbound message content", async () => {
+  fetchMock.mockClear()
+
+  await createChatCompletions({
+    model: "gpt-test",
+    messages: [
+      { role: "user", content: "hello   \n\n" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "kept\t\t\n" },
+          {
+            type: "image_url",
+            image_url: { url: "https://example.test/a.png" },
+          },
+        ],
+      },
+    ],
+  })
+
+  const forwardedBody = JSON.parse(
+    getLastForwardedRequest().body,
+  ) as ChatCompletionsPayload
+
+  expect(forwardedBody.messages[0]?.content).toBe("hello")
+  expect(forwardedBody.messages[1]?.content).toEqual([
+    { type: "text", text: "kept" },
+    { type: "image_url", image_url: { url: "https://example.test/a.png" } },
+  ])
 })
 
 test("returns upstream headers alongside non-streaming responses", async () => {
