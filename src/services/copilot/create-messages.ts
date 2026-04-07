@@ -64,8 +64,68 @@ function normalizeMessagesPayload(
   payload: AnthropicMessagesPayload,
 ): AnthropicMessagesPayload {
   const thinking = normalizeThinkingConfig(payload)
+  const system = normalizeSystemBlocks(payload.system)
+  const messages = payload.messages.map(normalizeMessageCacheControl)
+  const tools = payload.tools?.map(normalizeToolCacheControl)
 
-  return thinking ? { ...payload, thinking } : payload
+  return {
+    ...payload,
+    ...(thinking ? { thinking } : {}),
+    ...(system ? { system } : {}),
+    messages,
+    ...(tools ? { tools } : {}),
+  }
+}
+
+function normalizeSystemBlocks(
+  system: AnthropicMessagesPayload["system"],
+): AnthropicMessagesPayload["system"] {
+  if (!Array.isArray(system)) {
+    return system
+  }
+
+  return system.map((block) => ({
+    ...block,
+    ...(block.cache_control ? { cache_control: { type: "ephemeral" } } : {}),
+  }))
+}
+
+function normalizeMessageCacheControl(
+  message: AnthropicMessagesPayload["messages"][number],
+): AnthropicMessagesPayload["messages"][number] {
+  if (typeof message.content === "string") {
+    return message
+  }
+
+  return {
+    ...message,
+    content: message.content.map((block) => {
+      if (block.type === "tool_result") {
+        return {
+          ...block,
+          ...(block.cache_control ? { cache_control: { type: "ephemeral" } } : {}),
+        }
+      }
+
+      if (block.type === "text" || block.type === "image") {
+        return {
+          ...block,
+          ...(block.cache_control ? { cache_control: { type: "ephemeral" } } : {}),
+        }
+      }
+
+      return block
+    }),
+  }
+}
+
+function normalizeToolCacheControl(
+  tool: AnthropicMessagesPayload["tools"][number],
+): AnthropicMessagesPayload["tools"][number] {
+  return {
+    ...tool,
+    ...(tool.cache_control ? { cache_control: { type: "ephemeral" } } : {}),
+  }
 }
 
 function normalizeThinkingConfig(
