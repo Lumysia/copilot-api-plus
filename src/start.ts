@@ -120,6 +120,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
+    // Bun's default idleTimeout is 10 seconds which kills long-running SSE
+    // streams (e.g. when the LLM is thinking). Set to 0 to disable.
+    bun: { idleTimeout: 0 },
   })
 }
 
