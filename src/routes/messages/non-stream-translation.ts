@@ -159,8 +159,8 @@ function handleAssistantMessage(
           ...(primaryThinkingBlock === undefined ?
             {}
           : {
+              reasoning_opaque: primaryThinkingBlock.signature,
               reasoning_text: primaryThinkingBlock.thinking,
-              signature: primaryThinkingBlock.signature,
             }),
           tool_calls: toolUseBlocks.map((toolUse) => ({
             id: toolUse.id,
@@ -179,8 +179,8 @@ function handleAssistantMessage(
           ...(primaryThinkingBlock === undefined ?
             {}
           : {
+              reasoning_opaque: primaryThinkingBlock.signature,
               reasoning_text: primaryThinkingBlock.thinking,
-              signature: primaryThinkingBlock.signature,
             }),
         },
       ]
@@ -259,9 +259,26 @@ function translateAnthropicToolsToOpenAI(
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: tool.input_schema,
+      parameters: normalizeAnthropicInputSchema(tool.input_schema),
     },
   }))
+}
+
+function normalizeAnthropicInputSchema(
+  inputSchema: AnthropicTool["input_schema"],
+): Record<string, unknown> {
+  const { $schema: _schema, ...restInputSchema } = inputSchema as Record<
+    string,
+    unknown
+  > & {
+    $schema?: unknown
+  }
+
+  return {
+    type: "object",
+    properties: {},
+    ...restInputSchema,
+  }
 }
 
 function translateAnthropicToolChoiceToOpenAI(
