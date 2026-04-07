@@ -429,6 +429,66 @@ test("routes claude `/v1/messages` requests to upstream messages api", async () 
   })
 })
 
+test("routes Claude family aliases to upstream messages api", async () => {
+  let forwardedUrl: string | undefined
+  let forwardedBody: Record<string, unknown> | undefined
+
+  globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) => {
+    if (typeof url === "string") {
+      forwardedUrl = url
+    } else if (url instanceof URL) {
+      forwardedUrl = url.toString()
+    } else {
+      forwardedUrl = url.url
+    }
+
+    const requestBody = typeof init?.body === "string" ? init.body : "{}"
+    forwardedBody = JSON.parse(requestBody) as Record<string, unknown>
+
+    return new Response(
+      JSON.stringify({
+        id: "msg_claude_alias",
+        type: "message",
+        role: "assistant",
+        model: "Claude Sonnet 4.6",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4",
+      max_tokens: 256,
+      messages: [{ role: "user", content: "hello" }],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(forwardedUrl).toBe("https://api.githubcopilot.com/v1/messages")
+  expect(forwardedBody).toMatchObject({
+    model: "claude-sonnet-4.6",
+  })
+})
+
 test("normalizes claude thinking budget to upstream minimum for messages api", async () => {
   let forwardedBody: Record<string, unknown> | undefined
 

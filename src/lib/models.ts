@@ -57,7 +57,33 @@ function normalizeModelName(value: string): string {
   return value.trim().toLowerCase()
 }
 
+function buildClaudeAliases(model: Model): Array<string> {
+  const aliases = new Set<string>([model.id])
+  const normalizedName = normalizeModelName(model.name)
+  const family = normalizeModelName(model.capabilities.family)
+
+  if (family.startsWith("claude")) {
+    aliases.add(family)
+  }
+
+  if (normalizedName.startsWith("claude ")) {
+    aliases.add(normalizedName.replaceAll(/\s+/g, "-"))
+  }
+
+  const version = model.version.trim()
+  if (family.startsWith("claude") && version) {
+    const compactVersion = version.replaceAll("-", "")
+    aliases.add(`${family}-${compactVersion}`)
+  }
+
+  return [...aliases]
+}
+
 function getModelAliases(model: Model): Array<string> {
+  if (normalizeModelName(model.id).startsWith("claude")) {
+    return buildClaudeAliases(model)
+  }
+
   return [model.id]
 }
 

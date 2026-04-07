@@ -124,5 +124,35 @@ test("lists canonical models with enriched capabilities metadata", async () => {
     },
   })
 
-  expect(json.data).toHaveLength(2)
+  expect(json.data).toHaveLength(3)
+})
+
+test("lists Claude family aliases that resolve to the same canonical model", async () => {
+  const response = await server.request("http://localhost/v1/models", {
+    headers: {
+      Authorization: "Bearer test-key",
+    },
+  })
+
+  expect(response.status).toBe(200)
+
+  const json = (await response.json()) as {
+    object: string
+    data: Array<Record<string, unknown>>
+    has_more: boolean
+  }
+
+  const familyAlias = json.data.find(
+    (model) => model.id === "claude-sonnet-4.5",
+  )
+  expect(familyAlias).toMatchObject({
+    id: "claude-sonnet-4.5",
+    root: "claude-sonnet-4.5-20250929",
+    canonical_model_id: "claude-sonnet-4.5-20250929",
+  })
+
+  const displayAlias = json.data.find(
+    (model) => model.id === "claude-sonnet-4.5",
+  )
+  expect(displayAlias).toBeDefined()
 })
