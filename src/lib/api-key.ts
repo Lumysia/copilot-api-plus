@@ -4,10 +4,6 @@ import consola from "consola"
 
 import { state } from "~/lib/state"
 
-const AUTH_WINDOW_MS = 5 * 60 * 1000
-const AUTH_MAX_FAILURES = 10
-const AUTH_BLOCK_MS = 15 * 60 * 1000
-
 function getBearerToken(
   authorizationHeader: string | undefined,
 ): string | undefined {
@@ -50,40 +46,6 @@ function getRequestTarget(c: Context): string {
   }
 }
 
-function isClientBlocked(clientAddress: string, now: number): boolean {
-  const entry = state.authFailures.get(clientAddress)
-  if (!entry?.blockedUntil) return false
-
-  if (entry.blockedUntil <= now) {
-    state.authFailures.delete(clientAddress)
-    return false
-  }
-
-  return true
-}
-
-function recordAuthFailure(clientAddress: string, now: number): void {
-  const entry = state.authFailures.get(clientAddress)
-
-  if (!entry || entry.resetAt <= now) {
-    state.authFailures.set(clientAddress, {
-      blockedUntil: undefined,
-      count: 1,
-      resetAt: now + AUTH_WINDOW_MS,
-    })
-    return
-  }
-
-  entry.count += 1
-  if (entry.count >= AUTH_MAX_FAILURES) {
-    entry.blockedUntil = now + AUTH_BLOCK_MS
-  }
-}
-
-function clearAuthFailures(clientAddress: string): void {
-  state.authFailures.delete(clientAddress)
-}
-
 function rejectUnauthorized() {
   return {
     error: {
@@ -108,27 +70,20 @@ export async function requireApiKey(c: Context, next: Next) {
     return
   }
 
-  const now = Date.now()
   const clientAddress = getClientAddress(c)
-
-  if (isClientBlocked(clientAddress, now)) {
-    consola.warn(
-      `Blocked API key request from ${clientAddress} to ${getRequestTarget(c)}`,
-    )
-    return c.json(rejectUnauthorized(), 429)
-  }
 
   const authorization = c.req.header("authorization")
   const bearerToken = getBearerToken(authorization)
   const xApiKey = c.req.header("x-api-key")
 
   if (bearerToken === state.apiKey || xApiKey === state.apiKey) {
-    clearAuthFailures(clientAddress)
+    consola.info(
+      `Accepted API key request from ${clientAddress} to ${getRequestTarget(c)}`,
+    )
     await next()
     return
   }
 
-  recordAuthFailure(clientAddress, now)
   consola.warn(
     `Rejected API key request from ${clientAddress} to ${getRequestTarget(c)}`,
   )
