@@ -70,10 +70,24 @@ export interface AnthropicImageBlock {
   cache_control?: AnthropicCacheControl
 }
 
+export interface AnthropicDocumentBlock {
+  type: "document"
+  source: {
+    type: "base64"
+    media_type: "application/pdf"
+    data: string
+  }
+  title?: string
+  context?: string
+  cache_control?: AnthropicCacheControl
+}
+
 export interface AnthropicToolResultBlock {
   type: "tool_result"
   tool_use_id: string
-  content: string | Array<AnthropicTextBlock | AnthropicImageBlock>
+  content:
+    | string
+    | Array<AnthropicTextBlock | AnthropicImageBlock | AnthropicDocumentBlock>
   is_error?: boolean
   cache_control?: AnthropicCacheControl
 }
@@ -94,6 +108,7 @@ export interface AnthropicThinkingBlock {
 export type AnthropicUserContentBlock =
   | AnthropicTextBlock
   | AnthropicImageBlock
+  | AnthropicDocumentBlock
   | AnthropicToolResultBlock
 
 export type AnthropicAssistantContentBlock =

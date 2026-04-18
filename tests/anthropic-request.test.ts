@@ -319,6 +319,47 @@ describe("Anthropic tool translation", () => {
     })
   })
 
+  test("should convert document blocks into text placeholders for chat-completions fallback", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Summarize this attachment" },
+            {
+              type: "document",
+              title: "report.pdf",
+              context: "Quarterly revenue report",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: "JVBERi0xLjQK",
+              },
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = expectValidTranslatedPayload(anthropicPayload)
+    expect(openAIPayload.messages[0]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "Summarize this attachment" },
+        {
+          type: "text",
+          text: [
+            "[Attached document omitted for chat-completions fallback: application/pdf]",
+            "Details: report.pdf — Quarterly revenue report",
+            "Approximate size: 9 bytes (base64 payload preserved only on upstream Claude messages API).",
+          ].join("\n"),
+        },
+      ],
+    })
+  })
+
   test("should normalize anthropic tool schemas to Copilot tool parameter shape", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "claude-3-5-sonnet-20241022",

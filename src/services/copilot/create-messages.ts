@@ -115,7 +115,11 @@ function normalizeMessageCacheControl(
         }
       }
 
-      if (block.type === "text" || block.type === "image") {
+      if (
+        block.type === "text"
+        || block.type === "image"
+        || block.type === "document"
+      ) {
         return {
           ...block,
           ...(block.cache_control ?

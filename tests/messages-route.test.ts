@@ -1,3 +1,5 @@
+/* eslint-disable max-lines */
+
 import { afterEach, beforeEach, expect, test } from "bun:test"
 
 import { state } from "../src/lib/state"
@@ -762,4 +764,96 @@ test("streams claude messages api events without chat-completions translation", 
   const body = await response.text()
   expect(body).toContain("event: content_block_start")
   expect(body).toContain('"type":"thinking"')
+})
+
+test("forwards document blocks to upstream claude messages api", async () => {
+  let forwardedBody: Record<string, unknown> | undefined
+
+  globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+    const requestBody = init?.body
+    forwardedBody =
+      typeof requestBody === "string" ?
+        (JSON.parse(requestBody) as Record<string, unknown>)
+      : {}
+
+    return new Response(
+      JSON.stringify({
+        id: "msg_document",
+        type: "message",
+        role: "assistant",
+        model: "Claude Sonnet 4.6",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+    )
+  }) as unknown as typeof fetch
+
+  const response = await server.request("http://localhost/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-key",
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4.6",
+      max_tokens: 256,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Summarize this pdf" },
+            {
+              type: "document",
+              title: "report.pdf",
+              context: "Quarterly report",
+              cache_control: {
+                type: "ephemeral",
+                ephemeral: { scope: "conversation" },
+              },
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: "JVBERi0xLjQK",
+              },
+            },
+          ],
+        },
+      ],
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(forwardedBody).toMatchObject({
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Summarize this pdf" },
+          {
+            type: "document",
+            title: "report.pdf",
+            context: "Quarterly report",
+            cache_control: { type: "ephemeral" },
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: "JVBERi0xLjQK",
+            },
+          },
+        ],
+      },
+    ],
+  })
 })

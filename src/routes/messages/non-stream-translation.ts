@@ -227,8 +227,10 @@ function mapContent(
     return null
   }
 
-  const hasImage = content.some((block) => block.type === "image")
-  if (!hasImage) {
+  const hasBinaryAttachment = content.some(
+    (block) => block.type === "image" || block.type === "document",
+  )
+  if (!hasBinaryAttachment) {
     return content
       .filter(
         (block): block is AnthropicTextBlock | AnthropicThinkingBlock =>
@@ -261,10 +263,40 @@ function mapContent(
 
         break
       }
+      case "document": {
+        contentParts.push({
+          type: "text",
+          text: formatDocumentAttachment(block),
+        })
+
+        break
+      }
       // No default
     }
   }
   return contentParts
+}
+
+function formatDocumentAttachment(block: {
+  source: {
+    media_type: string
+    data: string
+  }
+  title?: string
+  context?: string
+}): string {
+  const details = [block.title, block.context]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join(" — ")
+  const approximateBytes = Math.floor((block.source.data.length * 3) / 4)
+
+  return [
+    `[Attached document omitted for chat-completions fallback: ${block.source.media_type}]`,
+    details ? `Details: ${details}` : undefined,
+    `Approximate size: ${approximateBytes} bytes (base64 payload preserved only on upstream Claude messages API).`,
+  ]
+    .filter(Boolean)
+    .join("\n")
 }
 
 function translateAnthropicToolsToOpenAI(
