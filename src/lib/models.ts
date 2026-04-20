@@ -2,9 +2,6 @@ import type { Model, ModelsResponse } from "~/services/copilot/get-models"
 
 import { state } from "~/lib/state"
 
-const MODEL_CREATED = 0
-const MODEL_CREATED_AT = new Date(MODEL_CREATED).toISOString()
-
 export interface ResolvedModel {
   requestedModel: string
   resolvedModel: string
@@ -15,8 +12,6 @@ interface PublicModelEntry {
   id: string
   object: "model"
   type: string
-  created: number
-  created_at: string
   owned_by: string
   display_name: string
   root: string
@@ -114,8 +109,6 @@ export function getPublicModels(): Array<PublicModelEntry> {
         id: alias,
         object: "model",
         type: model.capabilities.type,
-        created: MODEL_CREATED,
-        created_at: MODEL_CREATED_AT,
         owned_by: model.vendor,
         display_name: model.name,
         root: model.id,

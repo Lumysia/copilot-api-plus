@@ -94,6 +94,8 @@ test("lists canonical models with enriched capabilities metadata", async () => {
     parent: null,
     canonical_model_id: "gpt-4o-2024-05-13",
   })
+  expect(gptModel).not.toHaveProperty("created")
+  expect(gptModel).not.toHaveProperty("created_at")
   expect(gptModel?.capabilities).toMatchObject({
     family: "gpt-4o",
     supports: {
